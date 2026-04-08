@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir flask openenv-core>=0.2.0 || pip install --no-cache-dir flask
 
 COPY . .
 
@@ -12,4 +13,4 @@ ENV MODEL_NAME="gpt-4.1-mini"
 
 EXPOSE 7860
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "server.app"]
