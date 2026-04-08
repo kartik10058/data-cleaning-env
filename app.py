@@ -1,20 +1,36 @@
 """
-app.py — Web server wrapper for HF Spaces.
+app.py — Web server for HF Spaces.
 
-HF Spaces requires a long-running HTTP server on port 7860.
-This file starts a Flask server that:
-  - Shows a status page at GET /
-  - Runs inference for a task at GET /run?task=easy|medium|hard
-  - Runs all tasks at GET /run_all
+Exposes both:
+  1. A UI at GET / for running inference manually
+  2. OpenEnv API endpoints the validator calls:
+       POST /reset
+       POST /step
+       GET  /state
+       GET  /health
 """
 
 import os
 import sys
-import threading
 import subprocess
-from flask import Flask, Response, request
+from flask import Flask, Response, request, jsonify
+
+sys.path.insert(0, os.path.dirname(__file__))
+from env.environment import DataCleaningEnv, Action
 
 app = Flask(__name__)
+
+# Global environment instance (one per server process)
+_env: DataCleaningEnv = None
+_current_task = "easy"
+
+
+def get_env() -> DataCleaningEnv:
+    global _env
+    if _env is None:
+        _env = DataCleaningEnv(task_name=_current_task)
+    return _env
+
 
 # ── HTML template ─────────────────────────────────────────────────────────────
 PAGE = """<!DOCTYPE html>
@@ -26,7 +42,6 @@ PAGE = """<!DOCTYPE html>
     h1   {{ color: #58a6ff; }}
     pre  {{ background: #161b22; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }}
     a    {{ color: #58a6ff; margin-right: 1rem; }}
-    .tag {{ color: #3fb950; font-weight: bold; }}
   </style>
 </head>
 <body>
@@ -51,7 +66,8 @@ STATUS_MSG = (
     "  hard   — remove duplicates + outliers\n"
 )
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+
+# ── UI Routes ─────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -63,7 +79,6 @@ def run_task():
     task = request.args.get("task", "easy")
     if task not in ("easy", "medium", "hard"):
         return PAGE.format(output=f"Unknown task: {task}. Use easy, medium, or hard."), 400
-
     output = run_inference(task)
     return PAGE.format(output=output)
 
@@ -77,36 +92,91 @@ def run_all():
     return PAGE.format(output="\n\n".join(results))
 
 
-@app.route("/health")
+# ── OpenEnv API Routes ────────────────────────────────────────────────────────
+
+@app.route("/reset", methods=["POST"])
+def reset():
+    """
+    OpenEnv validator calls POST /reset to start a new episode.
+    Body (optional JSON): {"task": "easy"|"medium"|"hard"}
+    Returns the initial observation as JSON.
+    """
+    global _env, _current_task
+
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", "easy")
+    if task not in ("easy", "medium", "hard"):
+        task = "easy"
+
+    _current_task = task
+    _env = DataCleaningEnv(task_name=task)
+    obs = _env.reset()
+
+    return jsonify({
+        "task_name":      obs.task_name,
+        "description":    obs.description,
+        "current_data":   obs.current_data,
+        "step_number":    obs.step_number,
+        "previous_score": obs.previous_score,
+    })
+
+
+@app.route("/step", methods=["POST"])
+def step():
+    """
+    OpenEnv validator calls POST /step to take an action.
+    Body JSON: {"action": "<action_string>"}
+    Returns observation + reward as JSON.
+    """
+    env = get_env()
+    data = request.get_json(silent=True) or {}
+    action_str = data.get("action", "")
+
+    obs, reward = env.step(Action(action_str=action_str))
+
+    return jsonify({
+        "observation": {
+            "task_name":      obs.task_name,
+            "description":    obs.description,
+            "current_data":   obs.current_data,
+            "step_number":    obs.step_number,
+            "previous_score": obs.previous_score,
+        },
+        "reward": reward.value,
+        "done":   reward.done,
+        "info":   reward.info,
+    })
+
+
+@app.route("/state", methods=["GET"])
+def state():
+    """
+    OpenEnv validator calls GET /state to check current state.
+    """
+    env = get_env()
+    return jsonify(env.state())
+
+
+@app.route("/health", methods=["GET"])
 def health():
-    return {"status": "ok"}, 200
+    return jsonify({"status": "ok"}), 200
 
 
-# ── Inference runner ──────────────────────────────────────────────────────────
+# ── Inference runner (for UI) ─────────────────────────────────────────────────
 
 def run_inference(task_name: str) -> str:
-    """
-    Runs inference.py for one task as a subprocess.
-    Captures stdout + stderr and returns it as a string.
-    This avoids import conflicts and gives clean isolated output.
-    """
     env = os.environ.copy()
-    env["SINGLE_TASK"] = task_name   # inference.py reads this if set
-
     result = subprocess.run(
         [sys.executable, "inference.py", "--task", task_name],
         capture_output=True,
         text=True,
         env=env,
-        timeout=120,   # 2 min max per task
+        timeout=120,
     )
-
     output = result.stdout
     if result.stderr:
         output += f"\n\n--- stderr ---\n{result.stderr}"
-    if not output.strip():
-        output = "(no output)"
-    return output
+    return output or "(no output)"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
