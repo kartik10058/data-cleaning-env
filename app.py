@@ -1,138 +1,161 @@
-"""
-app.py — Web server for HF Spaces.
-"""
-
-import os
 import sys
-import subprocess
-from flask import Flask, request, jsonify
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-sys.path.insert(0, os.path.dirname(__file__))
-from env.environment import DataCleaningEnv, Action
+import pandas as pd
+from pydantic import BaseModel
+from openenv.core.env_server import Environment, create_fastapi_app
+from openenv.core.env_server.types import Action as BaseAction
 
-app = Flask(__name__)
-
-_env: DataCleaningEnv = None
-_current_task = "easy"
+from env.tasks import get_task
+from env.graders import score_progress
 
 
 def clamp(v):
     return round(min(max(float(v), 0.001), 0.999), 4)
 
 
-def get_env() -> DataCleaningEnv:
-    global _env
-    if _env is None:
-        _env = DataCleaningEnv(task_name=_current_task)
-    return _env
+class DataAction(BaseAction):
+    action_str: str = ""
 
 
-PAGE = """<!DOCTYPE html>
-<html>
-<head>
-  <title>Data Cleaning OpenEnv</title>
-  <style>
-    body {{ font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 2rem; }}
-    h1   {{ color: #58a6ff; }}
-    pre  {{ background: #161b22; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }}
-    a    {{ color: #58a6ff; margin-right: 1rem; }}
-  </style>
-</head>
-<body>
-  <h1>&#x1F9F9; Data Cleaning OpenEnv</h1>
-  <p>An OpenEnv RL environment for data cleaning tasks.</p>
-  <p>
-    <a href="/run?task=easy">&#9654; Run Easy Task</a>
-    <a href="/run?task=medium">&#9654; Run Medium Task</a>
-    <a href="/run?task=hard">&#9654; Run Hard Task</a>
-    <a href="/run_all">&#9654; Run All Tasks</a>
-  </p>
-  <pre>{output}</pre>
-</body>
-</html>"""
-
-STATUS_MSG = "Server is running.\n\nTasks:\n  easy   — fill missing values\n  medium — standardize formats\n  hard   — remove duplicates + outliers\n"
+class DataObservation(BaseModel):
+    task_name: str = "easy"
+    description: str = ""
+    current_data: str = ""
+    step_number: int = 0
+    previous_score: float = 0.001
+    reward: float = 0.001
+    done: bool = False
 
 
-@app.route("/")
-def index():
-    return PAGE.format(output=STATUS_MSG)
+class DataCleaningEnvironment(Environment):
+    MAX_STEPS = 5
 
-@app.route("/run")
-def run_task():
-    task = request.args.get("task", "easy")
-    if task not in ("easy", "medium", "hard"):
-        return PAGE.format(output=f"Unknown task: {task}"), 400
-    return PAGE.format(output=run_inference(task))
+    def __init__(self):
+        super().__init__()
+        self.task_name = "easy"
+        self.task_data = None
+        self.current_df = None
+        self.clean_df = None
+        self.step_count = 0
+        self.prev_score = 0.001
+        self._done = False
 
-@app.route("/run_all")
-def run_all():
-    results = []
-    for task in ["easy", "medium", "hard"]:
-        results.append(f"{'='*50}\nTASK: {task}\n{'='*50}")
-        results.append(run_inference(task))
-    return PAGE.format(output="\n\n".join(results))
+    def reset(self) -> DataObservation:
+        self.task_data = get_task(self.task_name)
+        self.current_df = self.task_data["dirty_df"].copy()
+        self.clean_df = self.task_data["clean_df"].copy()
+        self.step_count = 0
+        self.prev_score = 0.001
+        self._done = False
+        return DataObservation(
+            task_name=self.task_name,
+            description=self.task_data["description"],
+            current_data=self.current_df.to_csv(index=False),
+            step_number=0,
+            previous_score=0.001,
+            reward=0.001,
+            done=False,
+        )
 
-@app.route("/reset", methods=["POST"])
-def reset():
-    global _env, _current_task
-    data = request.get_json(silent=True) or {}
-    task = data.get("task", "easy")
-    if task not in ("easy", "medium", "hard"):
-        task = "easy"
-    _current_task = task
-    _env = DataCleaningEnv(task_name=task)
-    obs = _env.reset()
-    return jsonify({
-        "task_name":      obs.task_name,
-        "description":    obs.description,
-        "current_data":   obs.current_data,
-        "step_number":    obs.step_number,
-        "previous_score": clamp(obs.previous_score),
-    })
+    def step(self, action: DataAction) -> DataObservation:
+        if self._done:
+            return DataObservation(
+                task_name=self.task_name,
+                description="",
+                current_data="",
+                step_number=self.step_count,
+                previous_score=clamp(self.prev_score),
+                reward=0.001,
+                done=True,
+            )
 
-@app.route("/step", methods=["POST"])
-def step():
-    env = get_env()
-    data = request.get_json(silent=True) or {}
-    action_str = data.get("action", "")
-    obs, reward = env.step(Action(action_str=action_str))
-    return jsonify({
-        "observation": {
-            "task_name":      obs.task_name,
-            "description":    obs.description,
-            "current_data":   obs.current_data,
-            "step_number":    obs.step_number,
-            "previous_score": clamp(obs.previous_score),
-        },
-        "reward": clamp(reward.value),
-        "done":   reward.done,
-        "info":   reward.info,
-    })
+        self.step_count += 1
+        try:
+            self.current_df = self._apply_action(action.action_str)
+        except Exception:
+            done = self.step_count >= self.MAX_STEPS
+            self._done = done
+            return DataObservation(
+                task_name=self.task_name,
+                description=self.task_data["description"] if self.task_data else "",
+                current_data=self.current_df.to_csv(index=False) if self.current_df is not None else "",
+                step_number=self.step_count,
+                previous_score=clamp(self.prev_score),
+                reward=0.001,
+                done=done,
+            )
 
-@app.route("/state", methods=["GET"])
-def state():
-    env = get_env()
-    s = env.state()
-    s["prev_score"] = clamp(s.get("prev_score", 0.001))
-    return jsonify(s)
+        new_score = score_progress(self.task_name, self.current_df, self.clean_df)
+        reward = clamp(max(0.001, new_score - self.prev_score))
+        self._done = (new_score >= 0.999) or (self.step_count >= self.MAX_STEPS)
+        self.prev_score = new_score
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
+        return DataObservation(
+            task_name=self.task_name,
+            description=self.task_data["description"],
+            current_data=self.current_df.to_csv(index=False),
+            step_number=self.step_count,
+            previous_score=clamp(new_score),
+            reward=reward,
+            done=self._done,
+        )
 
-def run_inference(task_name: str) -> str:
-    env = os.environ.copy()
-    result = subprocess.run(
-        [sys.executable, "inference.py", "--task", task_name],
-        capture_output=True, text=True, env=env, timeout=120,
-    )
-    output = result.stdout
-    if result.stderr:
-        output += f"\n\n--- stderr ---\n{result.stderr}"
-    return output or "(no output)"
+    @property
+    def state(self):
+        return {
+            "task_name": self.task_name,
+            "step_count": self.step_count,
+            "prev_score": clamp(self.prev_score),
+            "done": self._done,
+        }
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))
-    print(f"Starting server on port {port}...", flush=True)
-    app.run(host="0.0.0.0", port=port, debug=False)
+    def _apply_action(self, action_str: str) -> pd.DataFrame:
+        df = self.current_df.copy()
+        action_str = action_str.strip()
+        if ":" not in action_str:
+            raise ValueError(f"Invalid action format: {action_str}")
+        action_type, params_str = action_str.split(":", 1)
+        action_type = action_type.strip().lower()
+        params = {}
+        for part in params_str.split(","):
+            part = part.strip()
+            if "=" in part:
+                k, v = part.split("=", 1)
+                params[k.strip()] = v.strip()
+        if action_type == "fill_nulls":
+            if "mean_age" in params:
+                df["age"] = df["age"].fillna(float(params["mean_age"]))
+            if "mean_salary" in params:
+                df["salary"] = df["salary"].fillna(float(params["mean_salary"]))
+            if "ffill_city" in params:
+                df["city"] = df["city"].fillna(params["ffill_city"])
+        elif action_type == "standardize":
+            if params.get("name") == "title_case":
+                df["name"] = df["name"].str.title()
+            if params.get("phone") == "digits_only":
+                df["phone"] = df["phone"].apply(
+                    lambda x: "".join(filter(str.isdigit, str(x)))
+                )
+            if params.get("date") == "iso":
+                df["date"] = pd.to_datetime(
+                    df["date"], infer_datetime_format=True
+                ).dt.strftime("%Y-%m-%d")
+        elif action_type == "clean_hard":
+            if params.get("remove_duplicates") == "true":
+                df = df.drop_duplicates(subset=["id"], keep="first").reset_index(drop=True)
+            if params.get("replace_outliers") == "mean":
+                for col in ["score", "salary"]:
+                    col_data = df[col].astype(float)
+                    mean = col_data.mean()
+                    std = col_data.std()
+                    is_outlier = (col_data - mean).abs() > 3 * std
+                    clean_mean = col_data[~is_outlier].mean()
+                    df[col] = col_data.where(~is_outlier, clean_mean)
+        else:
+            raise ValueError(f"Unknown action: {action_type}")
+        return df
+
+
+app = create_fastapi_app(DataCleaningEnvironment, DataAction, DataObservation)
