@@ -13,4 +13,4 @@ ENV MODEL_NAME="gpt-4.1-mini"
 
 EXPOSE 7860
 
-CMD ["python", "-m", "server.app"]
+CMD ["python", "app.py"]
