@@ -3,18 +3,10 @@ import numpy as np
 
 
 def _clamp(score: float) -> float:
-    """
-    Clamps score to strictly open interval (0.001, 0.999).
-    The validator requires scores strictly between 0 and 1 — not 0.0 or 1.0.
-    """
     return round(min(max(score, 0.001), 0.999), 4)
 
 
 def grade(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:
-    """
-    Master grader — routes to the correct grader based on task name.
-    Always returns a float strictly between 0 and 1 (exclusive).
-    """
     if task_name == "easy":
         return _clamp(grade_easy(result_df, clean_df))
     elif task_name == "medium":
@@ -25,149 +17,49 @@ def grade(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> fl
         raise ValueError(f"Unknown task: {task_name}")
 
 
-# ─────────────────────────────────────────────
-# GRADER 1 — EASY: Score null filling
-# ─────────────────────────────────────────────
-def grade_easy(result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:
-    """
-    Checks 3 specific cells that were originally null:
-      - age of David (row 3)
-      - salary of David (row 3)
-      - city of David (row 3)
-
-    Each correct cell = 1/3 of the score.
-    We allow a small tolerance (±0.5) for numeric values.
-    """
+def grade_easy(result_df, clean_df):
     score = 0.0
-    total_checks = 3
-
     try:
-        # Check age (numeric — allow small rounding difference)
-        result_age = float(result_df.loc[3, "age"])
-        clean_age  = float(clean_df.loc[3, "age"])
-        if abs(result_age - clean_age) <= 0.5:
+        if abs(float(result_df.loc[3,"age"]) - float(clean_df.loc[3,"age"])) <= 0.5:
             score += 1
-
-        # Check salary (numeric)
-        result_salary = float(result_df.loc[3, "salary"])
-        clean_salary  = float(clean_df.loc[3, "salary"])
-        if abs(result_salary - clean_salary) <= 1.0:
+        if abs(float(result_df.loc[3,"salary"]) - float(clean_df.loc[3,"salary"])) <= 1.0:
             score += 1
-
-        # Check city (string — exact match, case-insensitive)
-        result_city = str(result_df.loc[3, "city"]).strip().lower()
-        clean_city  = str(clean_df.loc[3, "city"]).strip().lower()
-        if result_city == clean_city:
+        if str(result_df.loc[3,"city"]).strip().lower() == str(clean_df.loc[3,"city"]).strip().lower():
             score += 1
-
-    except Exception:
-        # If anything goes wrong (wrong shape, missing column), score 0
-        return 0.0
-
-    return round(score / total_checks, 2)
+    except:
+        return 0.001
+    return score / 3
 
 
-# ─────────────────────────────────────────────
-# GRADER 2 — MEDIUM: Score format standardization
-# ─────────────────────────────────────────────
-def grade_medium(result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:
-    """
-    Checks every cell in the name, phone, and date columns.
-    Score = (number of correct cells) / (total cells to check)
-    """
-    columns_to_check = ["name", "phone", "date"]
-    correct = 0
-    total = 0
-
+def grade_medium(result_df, clean_df):
+    correct, total = 0, 0
     try:
-        for col in columns_to_check:
+        for col in ["name","phone","date"]:
             for i in range(len(clean_df)):
                 total += 1
-                result_val = str(result_df.loc[i, col]).strip()
-                clean_val  = str(clean_df.loc[i, col]).strip()
-
-                if col == "name":
-                    # Title case comparison
-                    if result_val.lower() == clean_val.lower():
-                        correct += 1
-                elif col == "phone":
-                    # Strip all non-digits before comparing
-                    result_digits = "".join(filter(str.isdigit, result_val))
-                    clean_digits  = "".join(filter(str.isdigit, clean_val))
-                    if result_digits == clean_digits:
-                        correct += 1
-                elif col == "date":
-                    # Exact string match for ISO format
-                    if result_val == clean_val:
-                        correct += 1
-
-    except Exception:
-        return 0.0
-
-    return round(correct / total, 2) if total > 0 else 0.0
+                r = str(result_df.loc[i,col]).strip()
+                c = str(clean_df.loc[i,col]).strip()
+                if col == "name" and r.lower() == c.lower(): correct += 1
+                elif col == "phone" and "".join(filter(str.isdigit,r)) == "".join(filter(str.isdigit,c)): correct += 1
+                elif col == "date" and r == c: correct += 1
+    except:
+        return 0.001
+    return correct / total if total > 0 else 0.001
 
 
-# ─────────────────────────────────────────────
-# GRADER 3 — HARD: Score dedup + outlier removal
-# ─────────────────────────────────────────────
-def grade_hard(result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:
-    """
-    Two sub-scores, equally weighted:
-      1. Deduplication score  (0.0 to 0.5)
-         — Did the agent remove the duplicate row?
-         — Is the row count correct?
-      2. Outlier replacement score (0.0 to 0.5)
-         — Were outlier values replaced with correct means?
-
-    Total = dedup_score + outlier_score (max 1.0)
-    """
-    dedup_score   = 0.0
-    outlier_score = 0.0
-
+def grade_hard(result_df, clean_df):
+    d, o = 0.0, 0.0
     try:
-        # ── Sub-score 1: Deduplication ──
-        # Expected: 5 rows, unique ids [1,2,3,4,5]
-        if len(result_df) == len(clean_df):
-            dedup_score += 0.25  # correct row count
-
-        result_ids = sorted(result_df["id"].tolist())
-        clean_ids  = sorted(clean_df["id"].tolist())
-        if result_ids == clean_ids:
-            dedup_score += 0.25  # correct unique ids
-
-        # ── Sub-score 2: Outlier replacement ──
-        # Find rows where clean_df differs from dirty baseline
-        # Check score for David (id=4) and salary for Eva (id=5)
-
-        # Score outlier — David's score should be ~85.25
-        david_row = result_df[result_df["id"] == 4]
-        if not david_row.empty:
-            result_score = float(david_row["score"].values[0])
-            clean_score  = float(clean_df[clean_df["id"] == 4]["score"].values[0])
-            if abs(result_score - clean_score) <= 1.0:
-                outlier_score += 0.25
-
-        # Salary outlier — Eva's salary should be ~58750
-        eva_row = result_df[result_df["id"] == 5]
-        if not eva_row.empty:
-            result_sal = float(eva_row["salary"].values[0])
-            clean_sal  = float(clean_df[clean_df["id"] == 5]["salary"].values[0])
-            if abs(result_sal - clean_sal) <= 100.0:
-                outlier_score += 0.25
-
-    except Exception:
-        return 0.0
-
-    total = round(dedup_score + outlier_score, 2)
-    return total
+        if len(result_df) == len(clean_df): d += 0.25
+        if sorted(result_df["id"].tolist()) == sorted(clean_df["id"].tolist()): d += 0.25
+        dr = result_df[result_df["id"]==4]
+        if not dr.empty and abs(float(dr["score"].values[0]) - float(clean_df[clean_df["id"]==4]["score"].values[0])) <= 1.0: o += 0.25
+        er = result_df[result_df["id"]==5]
+        if not er.empty and abs(float(er["salary"].values[0]) - float(clean_df[clean_df["id"]==5]["salary"].values[0])) <= 100.0: o += 0.25
+    except:
+        return 0.001
+    return d + o
 
 
-# ─────────────────────────────────────────────
-# UTILITY: Partial progress scorer
-# ─────────────────────────────────────────────
-def score_progress(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:
-    """
-    Same as grade() but used mid-episode to give incremental rewards.
-    The environment calls this after every step to measure improvement.
-    """
+def score_progress(task_name, result_df, clean_df):
     return _clamp(grade(task_name, result_df, clean_df))
