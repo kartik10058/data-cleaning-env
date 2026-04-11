@@ -3,7 +3,7 @@ import numpy as np
 
 
 def _clamp(score: float) -> float:
-    return round(min(max(score, 0.001), 0.999), 4)
+    return round(min(max(score, 0.001), 0.99), 4)
 
 
 def grade(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> float:

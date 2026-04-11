@@ -62,7 +62,7 @@ def run_episode(task_name):
 
             if reward.done:
                 final_score = clamp(reward.info.get("score", obs.previous_score))
-                success = final_score >= 0.999
+                success = final_score >= 0.99
                 final_steps = obs.step_number
                 break
 

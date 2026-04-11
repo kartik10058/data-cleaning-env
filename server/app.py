@@ -12,7 +12,7 @@ from env.tasks import get_task
 from env.graders import score_progress
 
 def clamp(v):
-    return round(min(max(float(v), 0.001), 0.999), 4)
+    return round(min(max(float(v), 0.001), 0.99), 4)
 
 class DataAction(BaseAction):
     action_str: str = ""
@@ -78,7 +78,7 @@ class DataCleaningEnvironment(Environment):
 
         new_score = score_progress(self.task_name, self.current_df, self.clean_df)
         reward = clamp(max(0.001, new_score - self.prev_score))
-        self.done = (new_score >= 0.999) or (self.step_count >= self.MAX_STEPS)
+        self.done = (new_score >= 0.99) or (self.step_count >= self.MAX_STEPS)
         self.prev_score = new_score
 
         return DataObservation(

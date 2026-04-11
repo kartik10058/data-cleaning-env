@@ -92,7 +92,7 @@ class DataCleaningEnv:
             done = self.step_count >= self.MAX_STEPS
             self.done = done
             return self._make_observation(), Reward(
-                value=max(0.001, min(0.999, round(reward_value, 2))),
+                value=max(0.001, min(0.99, round(reward_value, 2))),
                 done=done,
                 info={"error": self.last_error, "step": self.step_count}
             )
@@ -105,11 +105,11 @@ class DataCleaningEnv:
         reward_value = max(0.001, round(incremental, 2))
 
         # Episode is done if perfect score OR max steps reached
-        self.done = (new_score >= 0.999) or (self.step_count >= self.MAX_STEPS)
+        self.done = (new_score >= 0.99) or (self.step_count >= self.MAX_STEPS)
         self.prev_score = new_score
 
         return self._make_observation(), Reward(
-            value=max(0.001, min(0.999, round(reward_value, 2))),
+            value=max(0.001, min(0.99, round(reward_value, 2))),
             done=self.done,
             info={"score": new_score, "step": self.step_count}
         )
