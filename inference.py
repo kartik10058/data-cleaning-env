@@ -16,7 +16,7 @@ if HF_TOKEN is None:
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 def clamp(v):
-    return round(min(max(float(v), 0.001), 0.999), 4)
+    return round(min(max(float(v), 0.01), 0.99), 4)
 
 SYSTEM_PROMPT = """You are a data cleaning agent. Respond with EXACTLY ONE action string, nothing else.
 
