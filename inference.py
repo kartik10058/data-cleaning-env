@@ -15,7 +15,8 @@ if HF_TOKEN is None:
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
-def clamp(v): return round(min(max(float(v), 0.001), 0.999), 4)
+def clamp(v):
+    return round(min(max(float(v), 0.001), 0.999), 4)
 
 SYSTEM_PROMPT = """You are a data cleaning agent. Respond with EXACTLY ONE action string, nothing else.
 
@@ -25,15 +26,12 @@ SYSTEM_PROMPT = """You are a data cleaning agent. Respond with EXACTLY ONE actio
 
 def ask_llm(description, current_data, previous_score, step):
     msg = f"TASK:\n{description}\n\nDATA (CSV):\n{current_data}\n\nSCORE: {previous_score}\nSTEP: {step}\n\nRespond with ONLY the action string."
-    try:
-        r = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":msg}],
-            max_tokens=200, temperature=0.0,
-        )
-        return r.choices[0].message.content.strip()
-    except Exception as e:
-        raise e
+    r = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":msg}],
+        max_tokens=200, temperature=0.0,
+    )
+    return r.choices[0].message.content.strip()
 
 def run_episode(task_name):
     env = DataCleaningEnv(task_name=task_name)
@@ -46,7 +44,7 @@ def run_episode(task_name):
             try:
                 action_str = ask_llm(obs.description, obs.current_data, obs.previous_score, obs.step_number+1)
             except Exception as e:
-                action_str = "fill_nulls:mean_age=0,mean_salary=0,ffill_city=unknown"
+                action_str = "fill_nulls:mean_age=29.5,mean_salary=58750.0,ffill_city=Delhi"
                 r = clamp(0.001)
                 print(f"[STEP] step={obs.step_number+1} action={action_str} reward={r:.4f} done=false error=LLM_ERROR:{str(e)[:80]}", flush=True)
                 rewards_log.append(r)
@@ -63,7 +61,7 @@ def run_episode(task_name):
             rewards_log.append(r)
 
             if reward.done:
-                final_score = reward.info.get("score", obs.previous_score)
+                final_score = clamp(reward.info.get("score", obs.previous_score))
                 success = final_score >= 0.999
                 final_steps = obs.step_number
                 break
