@@ -77,7 +77,7 @@ class DataCleaningEnv:
         """
         if self.done:
             # Episode already over — return zero reward
-            return self._make_observation(), Reward(value=0.0, done=True, info={"error": "Episode already done"})
+            return self._make_observation(), Reward(value=0.001, done=True, info={"error": "Episode already done"})
 
         self.step_count += 1
         self.last_error = None
@@ -88,7 +88,7 @@ class DataCleaningEnv:
         except Exception as e:
             self.last_error = str(e)
             # Bad action — no change to dataframe, small penalty
-            reward_value = max(0.0, self.prev_score - 0.1)
+            reward_value = max(0.001, self.prev_score - 0.1)
             done = self.step_count >= self.MAX_STEPS
             self.done = done
             return self._make_observation(), Reward(
@@ -102,10 +102,10 @@ class DataCleaningEnv:
 
         # Incremental reward = improvement since last step
         incremental = new_score - self.prev_score
-        reward_value = max(0.0, round(incremental, 2))
+        reward_value = max(0.001, round(incremental, 2))
 
         # Episode is done if perfect score OR max steps reached
-        self.done = (new_score >= 1.0) or (self.step_count >= self.MAX_STEPS)
+        self.done = (new_score >= 0.999) or (self.step_count >= self.MAX_STEPS)
         self.prev_score = new_score
 
         return self._make_observation(), Reward(
