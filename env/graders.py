@@ -18,7 +18,7 @@ def grade(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> fl
 
 
 def grade_easy(result_df, clean_df):
-    score = 0.001
+    score = 0.00101
     try:
         if abs(float(result_df.loc[3,"age"]) - float(clean_df.loc[3,"age"])) <= 0.5:
             score += 1
