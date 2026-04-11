@@ -47,7 +47,7 @@ class DataCleaningEnv:
         self.current_df   = None   # the working (possibly partially cleaned) dataframe
         self.clean_df     = None   # the ground truth answer
         self.step_count   = 0
-        self.prev_score   = 0.0
+        self.prev_score   = 0.001
         self.last_error   = None   # last action error message, or None
         self.done         = False
 
@@ -61,7 +61,7 @@ class DataCleaningEnv:
         self.current_df = self.task_data["dirty_df"].copy()
         self.clean_df   = self.task_data["clean_df"].copy()
         self.step_count = 0
-        self.prev_score = 0.0
+        self.prev_score = 0.001
         self.last_error = None
         self.done       = False
 
@@ -92,7 +92,7 @@ class DataCleaningEnv:
             done = self.step_count >= self.MAX_STEPS
             self.done = done
             return self._make_observation(), Reward(
-                value=round(reward_value, 2),
+                value=max(0.001, min(0.999, round(reward_value, 2))),
                 done=done,
                 info={"error": self.last_error, "step": self.step_count}
             )
@@ -109,7 +109,7 @@ class DataCleaningEnv:
         self.prev_score = new_score
 
         return self._make_observation(), Reward(
-            value=reward_value,
+            value=max(0.001, min(0.999, round(reward_value, 2))),
             done=self.done,
             info={"score": new_score, "step": self.step_count}
         )
