@@ -18,7 +18,7 @@ def grade(task_name: str, result_df: pd.DataFrame, clean_df: pd.DataFrame) -> fl
 
 
 def grade_easy(result_df, clean_df):
-    score = 0.0
+    score = 0.001
     try:
         if abs(float(result_df.loc[3,"age"]) - float(clean_df.loc[3,"age"])) <= 0.5:
             score += 1
@@ -48,7 +48,7 @@ def grade_medium(result_df, clean_df):
 
 
 def grade_hard(result_df, clean_df):
-    d, o = 0.0, 0.0
+    d, o = 0.001, 0.001
     try:
         if len(result_df) == len(clean_df): d += 0.25
         if sorted(result_df["id"].tolist()) == sorted(clean_df["id"].tolist()): d += 0.25
