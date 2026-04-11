@@ -48,10 +48,10 @@ action_space:
 
 reward:
   type: float
-  range: [0.0, 1.0]
+  range: [0.001, 0.999]
   description: >
     Incremental improvement in score since the last step.
-    A perfect cleaning in one step yields reward=1.0.
-    An action that makes things worse or raises an error yields reward=0.0 (with small penalty applied to score).
+    A perfect cleaning in one step yields reward=0.999.
+    An action that makes things worse or raises an error yields reward=0.001.
 
 entry_point: env.environment:DataCleaningEnv
