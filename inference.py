@@ -75,7 +75,8 @@ def run_episode(task_name):
         env.close()
 
     rewards_str = ",".join(f"{r:.4f}" for r in rewards_log) if rewards_log else "0.001"
-    print(f"[END] success={'true' if success else 'false'} steps={final_steps} rewards={rewards_str}", flush=True)
+   avg_score = round(min(max(sum(rewards_log) / len(rewards_log) if rewards_log else 0.01, 0.01), 0.99), 2)
+print(f"[END] success={'true' if success else 'false'} steps={final_steps} rewards={rewards_str} score={avg_score}", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
