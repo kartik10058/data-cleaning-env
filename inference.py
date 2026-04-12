@@ -16,7 +16,7 @@ if HF_TOKEN is None:
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 def clamp(v):
-    return round(min(max(float(v), 0.01), 0.99), 4)
+    return round(min(max(float(v), 0.01), 0.99), 2)
 
 SYSTEM_PROMPT = """You are a data cleaning agent. Respond with EXACTLY ONE action string, nothing else.
 
@@ -29,14 +29,17 @@ def ask_llm(description, current_data, previous_score, step):
     r = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":msg}],
-        max_tokens=200, temperature=0.0,
+        max_tokens=200,
+        temperature=0.0,
     )
     return r.choices[0].message.content.strip()
 
 def run_episode(task_name):
     env = DataCleaningEnv(task_name=task_name)
     print(f"[START] task={task_name} env=data-cleaning-env model={MODEL_NAME}", flush=True)
-    rewards_log, success, final_steps = [], False, 0
+    rewards_log = []
+    success = False
+    final_steps = 0
 
     try:
         obs = env.reset()
@@ -45,8 +48,8 @@ def run_episode(task_name):
                 action_str = ask_llm(obs.description, obs.current_data, obs.previous_score, obs.step_number+1)
             except Exception as e:
                 action_str = "fill_nulls:mean_age=29.5,mean_salary=58750.0,ffill_city=Delhi"
-                r = clamp(0.001)
-                print(f"[STEP] step={obs.step_number+1} action={action_str} reward={r:.4f} done=false error=LLM_ERROR:{str(e)[:80]}", flush=True)
+                r = clamp(0.01)
+                print(f"[STEP] step={obs.step_number+1} action={action_str} reward={r:.2f} done=false error=LLM_ERROR:{str(e)[:80]}", flush=True)
                 rewards_log.append(r)
                 break
 
@@ -55,9 +58,9 @@ def run_episode(task_name):
             done_str = "true" if reward.done else "false"
             error_str = (reward.info.get("error") or "null")
             if error_str != "null":
-                error_str = error_str.replace("\n"," ")[:120]
+                error_str = error_str.replace("\n", " ")[:120]
 
-            print(f"[STEP] step={obs.step_number} action={action_str} reward={r:.4f} done={done_str} error={error_str}", flush=True)
+            print(f"[STEP] step={obs.step_number} action={action_str} reward={r:.2f} done={done_str} error={error_str}", flush=True)
             rewards_log.append(r)
 
             if reward.done:
@@ -68,21 +71,21 @@ def run_episode(task_name):
 
     except Exception as e:
         final_steps = final_steps or 1
-        r = clamp(0.001)
-        print(f"[STEP] step={final_steps} action=error reward={r:.4f} done=true error={str(e)[:120]}", flush=True)
+        r = clamp(0.01)
+        print(f"[STEP] step={final_steps} action=error reward={r:.2f} done=true error={str(e)[:120]}", flush=True)
         rewards_log.append(r)
     finally:
         env.close()
-        
-rewards_str = ",".join(f"{r:.2f}" for r in rewards_log) if rewards_log else "0.01"
-    avg_score = round(min(max(sum(rewards_log) / len(rewards_log) if rewards_log else 0.01, 0.01), 0.99), 2)
-    print(f"[END] success={'true' if success else 'false'} steps={final_steps} rewards={rewards_str} score={avg_score}", flush=True)
+
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards_log) if rewards_log else "0.01"
+    avg_score = clamp(sum(rewards_log) / len(rewards_log)) if rewards_log else 0.01
+    print(f"[END] success={'true' if success else 'false'} steps={final_steps} rewards={rewards_str} score={avg_score:.2f}", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", choices=["easy","medium","hard","all"], default="all")
+    parser.add_argument("--task", choices=["easy", "medium", "hard", "all"], default="all")
     args = parser.parse_args()
-    tasks = ["easy","medium","hard"] if args.task == "all" else [args.task]
+    tasks = ["easy", "medium", "hard"] if args.task == "all" else [args.task]
     for task in tasks:
         run_episode(task_name=task)
         print()
